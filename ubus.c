@@ -22,6 +22,7 @@
 #include "proto.h"
 #include "ubus.h"
 #include "system.h"
+#include "ucode.h"
 
 struct ubus_context *ubus_ctx = NULL;
 static struct blob_buf b;
@@ -204,6 +205,124 @@ netifd_netns_updown(struct ubus_context *ctx, struct ubus_object *obj,
 	return UBUS_STATUS_OK;
 }
 
+#define WAIT_DEFAULT_TIMEOUT	60000
+
+/*
+ * Bumped whenever netifd starts work that others may react to, so a caller
+ * can tell whether anything happened between two waits
+ */
+static uint32_t wait_generation;
+
+struct wait_req {
+	struct list_head list;
+	struct ubus_request_data req;
+	struct uloop_timeout timeout;
+};
+
+static LIST_HEAD(wait_reqs);
+
+enum {
+	WAIT_TIMEOUT,
+	__WAIT_MAX
+};
+
+static const struct blobmsg_policy wait_policy[__WAIT_MAX] = {
+	[WAIT_TIMEOUT] = { .name = "timeout", .type = BLOBMSG_TYPE_INT32 },
+};
+
+void
+netifd_ubus_wait_bump(void)
+{
+	wait_generation++;
+}
+
+static bool
+netifd_busy(void)
+{
+	return interface_busy() || interface_event_busy() ||
+	       netifd_ucode_busy();
+}
+
+static void
+netifd_wait_complete(struct wait_req *w, int ret)
+{
+	blob_buf_init(&b, 0);
+	blobmsg_add_u32(&b, "generation", wait_generation);
+	ubus_send_reply(ubus_ctx, &w->req, b.head);
+	ubus_complete_deferred_request(ubus_ctx, &w->req, ret);
+	uloop_timeout_cancel(&w->timeout);
+	list_del(&w->list);
+	free(w);
+}
+
+static void
+netifd_wait_check(struct uloop_timeout *t)
+{
+	struct wait_req *w, *tmp;
+
+	if (netifd_busy())
+		return;
+
+	list_for_each_entry_safe(w, tmp, &wait_reqs, list)
+		netifd_wait_complete(w, UBUS_STATUS_OK);
+}
+
+static struct uloop_timeout wait_check_timer = {
+	.cb = netifd_wait_check,
+};
+
+/*
+ * Called wherever a busy condition may have cleared. The check is deferred
+ * since this runs from deep within the state machines and from ucode, which
+ * must not be reentered
+ */
+void
+netifd_ubus_wait_kick(void)
+{
+	if (!list_empty(&wait_reqs))
+		uloop_timeout_set(&wait_check_timer, 0);
+}
+
+static void
+netifd_wait_timeout(struct uloop_timeout *t)
+{
+	netifd_wait_complete(container_of(t, struct wait_req, timeout),
+			     UBUS_STATUS_TIMEOUT);
+}
+
+static int
+netifd_handle_wait(struct ubus_context *ctx, struct ubus_object *obj,
+		   struct ubus_request_data *req, const char *method,
+		   struct blob_attr *msg)
+{
+	struct blob_attr *tb[__WAIT_MAX];
+	uint32_t timeout = WAIT_DEFAULT_TIMEOUT;
+	struct wait_req *w;
+
+	if (!netifd_busy()) {
+		blob_buf_init(&b, 0);
+		blobmsg_add_u32(&b, "generation", wait_generation);
+		ubus_send_reply(ctx, req, b.head);
+		return 0;
+	}
+
+	blobmsg_parse_attr(wait_policy, __WAIT_MAX, tb, msg);
+	if (tb[WAIT_TIMEOUT])
+		timeout = blobmsg_get_u32(tb[WAIT_TIMEOUT]);
+
+	w = calloc(1, sizeof(*w));
+	if (!w)
+		return UBUS_STATUS_UNKNOWN_ERROR;
+
+	ubus_defer_request(ctx, req, &w->req);
+	list_add_tail(&w->list, &wait_reqs);
+	w->timeout.cb = netifd_wait_timeout;
+	if (timeout)
+		uloop_timeout_set(&w->timeout, timeout);
+
+	return 0;
+}
+
 static struct ubus_method main_object_methods[] = {
 	{ .name = "restart", .handler = netifd_handle_restart },
 	{ .name = "reload", .handler = netifd_handle_reload },
@@ -211,6 +330,7 @@ static struct ubus_method main_object_methods[] = {
 	{ .name = "get_proto_handlers", .handler = netifd_get_proto_handlers },
 	UBUS_METHOD("add_dynamic", netifd_add_dynamic, dynamic_policy),
 	UBUS_METHOD("netns_updown", netifd_netns_updown, netns_updown_policy),
+	UBUS_METHOD("wait", netifd_handle_wait, wait_policy),
 };
 
 static struct ubus_object_type main_object_type =

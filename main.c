@@ -90,6 +90,7 @@ netifd_delete_process(struct netifd_process *proc)
 	list_del(&proc->list);
 	ustream_free(&proc->log.stream);
 	close(proc->log.fd.fd);
+	netifd_ubus_wait_kick();
 }
 
 static void __attribute__((format (printf, 1, 0)))

@@ -273,6 +273,15 @@ proto_ext_task_cb(struct netifd_process *p, int ret)
 	proto_ext_task_finish(state, p);
 }
 
+static bool
+proto_ext_busy(struct interface_proto_state *proto)
+{
+	struct proto_ext_state *state;
+
+	state = container_of(proto, struct proto_ext_state, proto);
+	return state->script_task.uloop.pending;
+}
+
 void
 proto_ext_free(struct interface_proto_state *proto)
 {
@@ -758,6 +767,7 @@ proto_ext_state_init(struct proto_ext_state *state,
 	proto_ext_checkup_attach(state, state->config);
 	state->proto.free = proto_ext_free;
 	state->proto.notify = proto_ext_notify;
+	state->proto.busy = proto_ext_busy;
 	state->teardown_timeout.cb = proto_ext_teardown_timeout_cb;
 	state->script_task.cb = proto_ext_script_cb;
 	state->script_task.dir_fd = dir_fd;

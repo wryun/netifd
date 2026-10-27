@@ -21,6 +21,7 @@
 #include "interface.h"
 #include "ucode.h"
 #include "proto-ucode.h"
+#include "ubus.h"
 
 uc_vm_t vm;
 static uc_value_t *netifd_obj;
@@ -198,6 +199,22 @@ uc_netifd_interface_handle_link(uc_vm_t *vm, size_t nargs)
 	return ucv_boolean_new(ret == 0);
 }
 
+static uc_value_t *
+netifd_get_cb(const char *name)
+{
+	uc_value_t *val;
+
+	val = ucv_object_get(netifd_obj, "cb", NULL);
+	if (ucv_type(val) != UC_OBJECT)
+		return NULL;
+
+	val = ucv_object_get(val, name, NULL);
+	if (!ucv_is_callable(val))
+		return NULL;
+
+	return val;
+}
+
 static void
 netifd_call_cb(const char *name, size_t nargs, ...)
 {
@@ -205,12 +222,8 @@ netifd_call_cb(const char *name, size_t nargs, ...)
 	va_list ap;
 
 	va_start(ap, nargs);
-	val = ucv_object_get(netifd_obj, "cb", NULL);
-	if (ucv_type(val) != UC_OBJECT)
-		goto out;
-
-	val = ucv_object_get(val, name, NULL);
-	if (!ucv_is_callable(val))
+	val = netifd_get_cb(name);
+	if (!val)
 		goto out;
 
 	uc_vm_stack_push(&vm, ucv_get(val));
@@ -242,6 +255,40 @@ void netifd_ucode_check_network_enabled(void)
 void netifd_ucode_hotplug_event(const char *name, bool add)
 {
 	netifd_call_cb("hotplug", 2, ucv_string_new(name), ucv_boolean_new(add));
+}
+
+bool netifd_ucode_busy(void)
+{
+	uc_value_t *val = netifd_get_cb("busy");
+	bool ret = false;
+
+	if (!val)
+		return false;
+
+	uc_vm_stack_push(&vm, ucv_get(val));
+	if (uc_vm_call(&vm, false, 0) == EXCEPTION_NONE) {
+		val = uc_vm_stack_pop(&vm);
+		ret = ucv_is_truish(val);
+		ucv_put(val);
+	}
+
+	return ret;
+}
+
+static uc_value_t *
+uc_netifd_wait_bump(uc_vm_t *vm, size_t nargs)
+{
+	netifd_ubus_wait_bump();
+
+	return NULL;
+}
+
+static uc_value_t *
+uc_netifd_wait_kick(uc_vm_t *vm, size_t nargs)
+{
+	netifd_ubus_wait_kick();
+
+	return NULL;
 }
 
 static uc_value_t *
@@ -527,6 +574,8 @@ static const uc_function_list_t netifd_fns[] = {
 	{ "interface_handle_link",	uc_netifd_interface_handle_link },
 	{ "interface_get_bridge",	uc_netifd_interface_get_bridge },
 	{ "add_proto",			uc_netifd_add_proto_fn },
+	{ "wait_bump",			uc_netifd_wait_bump },
+	{ "wait_kick",			uc_netifd_wait_kick },
 };
 
 

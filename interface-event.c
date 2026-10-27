@@ -109,6 +109,7 @@ task_complete(struct uloop_process *proc, int ret)
 		D(SYSTEM, "Complete hotplug handler for interface '%s'", current->name);
 	current = NULL;
 	call_hotplug();
+	netifd_ubus_wait_kick();
 }
 
 /*
@@ -123,6 +124,7 @@ interface_queue_event(struct interface *iface, enum interface_event ev)
 {
 	D(SYSTEM, "Queue hotplug handler for interface '%s', event '%s'",
 			iface->name, eventnames[ev]);
+	netifd_ubus_wait_bump();
 	if (ev == IFEV_UP || ev == IFEV_DOWN)
 		netifd_ubus_interface_event(iface, ev == IFEV_UP);
 
@@ -179,6 +181,12 @@ interface_queue_event(struct interface *iface, enum interface_event ev)
 		call_hotplug();
 }
 
+bool
+interface_event_busy(void)
+{
+	return current || task.pending || !list_empty(&pending);
+}
+
 static void
 interface_dequeue_event(struct interface *iface)
 {
@@ -187,6 +195,7 @@ interface_dequeue_event(struct interface *iface)
 
 	if (!list_empty(&iface->hotplug_list))
 		list_del_init(&iface->hotplug_list);
+	netifd_ubus_wait_kick();
 }
 
 static void interface_event_cb(struct interface_user *dep, struct interface *iface,

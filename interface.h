@@ -220,6 +220,8 @@ void interface_update_start(struct interface *iface, const bool keep_old);
 void interface_update_complete(struct interface *iface);
 
 void interface_start_pending(void);
+bool interface_busy(void);
+bool interface_event_busy(void);
 void interface_start_jail(int netns_fd, const char *jail);
 void interface_stop_jail(int netns_fd);
 

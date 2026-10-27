@@ -750,6 +750,7 @@ config_init_all(void)
 	}
 
 	config_init_board();
+	netifd_ubus_wait_bump();
 
 	vlist_update(&interfaces);
 	config_init = true;

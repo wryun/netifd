@@ -55,6 +55,11 @@ function hotplug(name, add)
 		wireless.hotplug(name, add);
 }
 
+function busy()
+{
+	return wireless?.busy();
+}
+
 function ex_wrap(cb)
 {
 	let fn = cb;
@@ -72,6 +77,7 @@ netifd.cb = {
 	config_init: ex_wrap(config_init),
 	config_start: ex_wrap(config_start),
 	check_interfaces: ex_wrap(check_interfaces),
+	busy: ex_wrap(busy),
 };
 
 const wireless_module = dirname(sourcepath()) + "/wireless.uc";

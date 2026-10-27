@@ -57,6 +57,7 @@ struct interface_proto_state {
 	/* filled in by the protocol handler */
 	int (*notify)(struct interface_proto_state *, struct blob_attr *data);
 	int (*cb)(struct interface_proto_state *, enum interface_proto_cmd cmd, bool force);
+	bool (*busy)(struct interface_proto_state *);
 	void (*free)(struct interface_proto_state *);
 };
 

@@ -23,6 +23,7 @@ extern uc_vm_t vm;
 void netifd_ucode_config_load(bool start);
 void netifd_ucode_check_network_enabled(void);
 void netifd_ucode_hotplug_event(const char *name, bool add);
+bool netifd_ucode_busy(void);
 void netifd_ucode_init(void);
 void netifd_ucode_free(void);
 

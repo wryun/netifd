@@ -321,6 +321,7 @@ mark_interface_down(struct interface *iface)
 	uloop_timeout_cancel(&iface->carrier_loss_timer);
 	iface->link_up_event = false;
 	iface->state = IFS_DOWN;
+	netifd_ubus_wait_kick();
 	switch (state) {
 	case IFS_UP:
 	case IFS_TEARDOWN:
@@ -820,6 +821,7 @@ interface_do_remove(struct interface *iface)
 	netifd_ubus_remove_interface(iface);
 	avl_delete(&interfaces.avl, &iface->node.avl);
 	interface_free(iface);
+	netifd_ubus_wait_kick();
 }
 
 static void
@@ -830,6 +832,7 @@ interface_remove_cb(struct uloop_timeout *timeout)
 	if (iface->config_state != IFC_REMOVE) {
 		iface->remove_pending = false;
 		iface->remove_timer.cb = NULL;
+		netifd_ubus_wait_kick();
 		return;
 	}
 
@@ -851,6 +854,7 @@ interface_handle_config_change(struct interface *iface)
 	enum interface_config_state state = iface->config_state;
 
 	iface->config_state = IFC_NORMAL;
+	netifd_ubus_wait_kick();
 	switch(state) {
 	case IFC_NORMAL:
 		break;
@@ -936,6 +940,7 @@ void interface_set_proto_state(struct interface *iface, struct interface_proto_s
 		iface->proto = NULL;
 	}
 	iface->state = IFS_DOWN;
+	netifd_ubus_wait_kick();
 	iface->proto = state;
 	if (!state)
 		return;
@@ -1533,7 +1538,12 @@ static void
 interface_relink_hotplug_cb(struct uloop_timeout *timeout)
 {
 	device_for_each(NULL, interface_relink_device, NULL);
+	netifd_ubus_wait_kick();
 }
+
+static struct uloop_timeout relink_timer = {
+	.cb = interface_relink_hotplug_cb,
+};
 
 /*
  * Deferred, since the link operations can reload interfaces, which calls
@@ -1542,11 +1552,37 @@ interface_relink_hotplug_cb(struct uloop_timeout *timeout)
 void
 interface_relink_hotplug(void)
 {
-	static struct uloop_timeout relink_timer = {
-		.cb = interface_relink_hotplug_cb,
-	};
-
 	uloop_timeout_set(&relink_timer, 1);
+}
+
+/*
+ * An interface is busy while netifd is still applying a change to it. Waiting
+ * on the network is not covered: neither an interface down for lack of a
+ * device or carrier, nor one in setup whose protocol waits for a peer (e.g.
+ * a DHCP lease) once its setup script has finished.
+ *
+ * Wherever one of these conditions clears, netifd_ubus_wait_kick() must be
+ * called, or a pending wait only returns at its timeout
+ */
+bool
+interface_busy(void)
+{
+	struct interface *iface;
+
+	if (relink_timer.pending)
+		return true;
+
+	vlist_for_each_element(&interfaces, iface, node) {
+		if (iface->state == IFS_TEARDOWN ||
+		    iface->config_state != IFC_NORMAL || iface->remove_pending)
+			return true;
+
+		if (iface->proto && iface->proto->busy &&
+		    iface->proto->busy(iface->proto))
+			return true;
+	}
+
+	return false;
 }
 
 void

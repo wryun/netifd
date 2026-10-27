@@ -167,6 +167,7 @@ function wdev_teardown_cb(wdev)
 
 	wdev.handler_data = {};
 	wdev.state = "down";
+	netifd.wait_kick();
 
 	if (wdev.delete) {
 		delete_wdev(wdev.data.name);
@@ -308,6 +309,7 @@ function setup()
 	wdev_proc_reset(this);
 	delete this.config_change;
 	this.state = "setup";
+	netifd.wait_bump();
 	run_handler(this, "setup", wdev_setup_cb);
 }
 
@@ -321,6 +323,7 @@ function teardown()
 
 	wdev_proc_reset(this);
 	this.state = "teardown";
+	netifd.wait_bump();
 	run_handler(this, "teardown", wdev_teardown_cb);
 }
 
@@ -458,6 +461,7 @@ function wdev_mark_up(wdev)
 			handle_link(data.ifname, data, true);
 	}
 	wdev.state = "up";
+	netifd.wait_kick();
 
 	return 0;
 }
@@ -581,6 +585,11 @@ function get_status_stations(wdev, vif)
 	return vlans;
 }
 
+function busy()
+{
+	return this.state == "setup" || this.state == "teardown";
+}
+
 function status()
 {
 	let interfaces = [];
@@ -595,7 +604,7 @@ function status()
 	}
 	return {
 		up: this.state == "up",
-		pending: this.state == "setup" || this.state == "teardown",
+		pending: this.busy(),
 		autostart: this.autostart,
 		disabled: !!this.data.config.disabled,
 		retry_setup_failed: !!this.retry_setup_failed,
@@ -630,6 +639,7 @@ const wdev_proto = {
 	stop,
 	setup,
 	status,
+	busy,
 	teardown,
 	check,
 	notify,

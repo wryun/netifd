@@ -366,6 +366,15 @@ function check_interfaces()
 			dev.check();
 }
 
+function busy()
+{
+	for (let name, dev in wireless.devices)
+		if (dev.busy())
+			return true;
+
+	return false;
+}
+
 function hotplug(ifname, add)
 {
 	for (let name, dev in wireless.devices)
@@ -583,4 +592,5 @@ return {
 	config_init,
 	config_start,
 	check_interfaces,
+	busy,
 };
